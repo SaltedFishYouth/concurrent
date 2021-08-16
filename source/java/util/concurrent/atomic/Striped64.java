@@ -156,6 +156,7 @@ abstract class Striped64 extends Number {
     /**
      * Spinlock (locked via CAS) used when resizing and/or creating Cells.
      */
+    // 0 是未加锁
     transient volatile int cellsBusy;
 
     /**
@@ -214,66 +215,97 @@ abstract class Striped64 extends Number {
     final void longAccumulate(long x, LongBinaryOperator fn,
                               boolean wasUncontended) {
         int h;
+        //h: 当前线程的随机值 为0时，发生竞争
         if ((h = getProbe()) == 0) {
             ThreadLocalRandom.current(); // force initialization
             h = getProbe();
+            //设置为true 不把他当一次真正的竞争
             wasUncontended = true;
         }
+        //是否扩容 false 一定不扩容 true有可能会扩容
         boolean collide = false;                // True if last slot nonempty
         for (;;) {
+            // as:cells a:当前线程的cell单元  n:cells的长度 v:
             Cell[] as; Cell a; int n; long v;
+
+            //条件：cells 初始化过
             if ((as = cells) != null && (n = as.length) > 0) {
+                //寻址算法，当前线程的cell单元为null
                 if ((a = as[(n - 1) & h]) == null) {
+                    //无锁状态
                     if (cellsBusy == 0) {       // Try to attach new Cell
+                        //创建当前的cell值
                         Cell r = new Cell(x);   // Optimistically create
+                        //无锁状态 并且获取到锁
                         if (cellsBusy == 0 && casCellsBusy()) {
+                            //创建成功的标志
                             boolean created = false;
                             try {               // Recheck under lock
                                 Cell[] rs; int m, j;
+                                //rs 当前cells ； m-cells长度 （这两条件一定成立）
+                                //如果 rs[j = (m - 1) & h] == null 当前线程的cell不为null 防止其他线程修改
                                 if ((rs = cells) != null &&
                                     (m = rs.length) > 0 &&
                                     rs[j = (m - 1) & h] == null) {
+                                    //赋值 并且创建成功状态改为true
                                     rs[j] = r;
                                     created = true;
                                 }
                             } finally {
                                 cellsBusy = 0;
                             }
+                            //真的创建成功就退出本次方法否则接着自旋
                             if (created)
                                 break;
                             continue;           // Slot is now non-empty
                         }
                     }
+                    //改成不扩容
                     collide = false;
                 }
+                //cells 初始化了而且 hash值不是零，并且 竞争失败，-》直接改然后往后走
                 else if (!wasUncontended)       // CAS already known to fail
                     wasUncontended = true;      // Continue after rehash
+
+                //当前线程 重置过hash 新名字的cell不为Null，才会到这
+                //重试修改 cell的值，如果成功，退出这个方法，否则重置hash
                 else if (a.cas(v = a.value, ((fn == null) ? v + x :
                                              fn.applyAsLong(v, x))))
                     break;
+                // 如果cells > cup核数 或者 cells发生扩容
                 else if (n >= NCPU || cells != as)
+                    //扩容意向修改为 不打算扩容 接着走重置hash值
                     collide = false;            // At max size or stale
+                // 设置 扩容意向为true 重置hash值
                 else if (!collide)
                     collide = true;
+                //1.6 没有锁，并且本线程获取到锁
                 else if (cellsBusy == 0 && casCellsBusy()) {
                     try {
+                        //防止其他线程 扩容了
                         if (cells == as) {      // Expand table unless stale
+                            //扩容2倍 并赋值
                             Cell[] rs = new Cell[n << 1];
                             for (int i = 0; i < n; ++i)
                                 rs[i] = as[i];
                             cells = rs;
                         }
                     } finally {
-                        cellsBusy = 0;
+                        cellsBusy = 0;//解锁
                     }
                     collide = false;
+                    //跳出这次循环 重试
                     continue;                   // Retry with expanded table
                 }
+
+                //重置当前hash 值
                 h = advanceProbe(h);
             }
+            //前提条件 cells未初始化，cellsBusy == 0 :未加锁   celss == as 其线程可能会修改  casCellsBusy：获取锁 true 是获取成功，把cellsBusgy改为1
             else if (cellsBusy == 0 && cells == as && casCellsBusy()) {
                 boolean init = false;
                 try {                           // Initialize table
+                    //初始化cells
                     if (cells == as) {
                         Cell[] rs = new Cell[2];
                         rs[h & 1] = new Cell(x);
@@ -286,6 +318,7 @@ abstract class Striped64 extends Number {
                 if (init)
                     break;
             }
+            // 有锁或扩容或抢锁时失败，-》cas 修改成功
             else if (casBase(v = base, ((fn == null) ? v + x :
                                         fn.applyAsLong(v, x))))
                 break;                          // Fall back on using base

@@ -82,12 +82,30 @@ public class LongAdder extends Striped64 implements Serializable {
      * @param x the value to add
      */
     public void add(long x) {
-        Cell[] as; long b, v; int m; Cell a;
+        // as：cell数组
+        Cell[] as;
+        // b:获取的base、v:期望值
+        long b, v;
+        // m:cell数组长度
+        int m;
+        // a:本线程的cell
+        Cell a;
+
+        // cells数组已经初始化 || 写base发生竞争
         if ((as = cells) != null || !casBase(b = base, b + x)) {
+
+            // true：cell本线程单元 未发生竞争
             boolean uncontended = true;
+
+            // as == null || (m = as.length - 1) < 0：       cell数组未初始化(所以是写base发生竞争进来的)
+            // (a = as[getProbe() & m]) == null:            当前线程的cell单元 未初始化(getProbe &m 是本线程的表示类似hash)
+            // !(uncontended = a.cas(v = a.value, v + x)):  线程单元写cas竞争了（有不同的线程获取的同个单元）
             if (as == null || (m = as.length - 1) < 0 ||
                 (a = as[getProbe() & m]) == null ||
                 !(uncontended = a.cas(v = a.value, v + x)))
+                //1、写base发生竞争 -》 重试||初始化cells
+                //2、cells已经初始化但当前线程的cell未空，-》创建自己的cell
+                //3、cell存在但是还是发生竞争 -》 重试||扩容
                 longAccumulate(x, null, uncontended);
         }
     }
