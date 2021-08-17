@@ -507,12 +507,14 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * bounds for power of two table sizes, and is further required
      * because the top two bits of 32bit hash fields are used for
      * control purposes.
+     * 散列表的最大值
      */
     private static final int MAXIMUM_CAPACITY = 1 << 30;
 
     /**
      * The default initial table capacity.  Must be a power of 2
      * (i.e., at least 1) and at most MAXIMUM_CAPACITY.
+     * 散列表的默认值
      */
     private static final int DEFAULT_CAPACITY = 16;
 
@@ -525,6 +527,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
     /**
      * The default concurrency level for this table. Unused but
      * defined for compatibility with previous versions of this class.
+     * 并发级别 1。7 遗留使用的。1.8 只有初始化的时候使用，不代表并发级别
      */
     private static final int DEFAULT_CONCURRENCY_LEVEL = 16;
 
@@ -534,6 +537,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * actual floating point value isn't normally used -- it is
      * simpler to use expressions such as {@code n - (n >>> 2)} for
      * the associated resizing threshold.
+     * 负载因子
      */
     private static final float LOAD_FACTOR = 0.75f;
 
@@ -544,6 +548,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * than 2, and should be at least 8 to mesh with assumptions in
      * tree removal about conversion back to plain bins upon
      * shrinkage.
+     * 树化阈值，指定桶位长度达到8的话，有可能进行树化操作
      */
     static final int TREEIFY_THRESHOLD = 8;
 
@@ -551,6 +556,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * The bin count threshold for untreeifying a (split) bin during a
      * resize operation. Should be less than TREEIFY_THRESHOLD, and at
      * most 6 to mesh with shrinkage detection under removal.
+     * 红黑树转化为 链表的阈值
      */
     static final int UNTREEIFY_THRESHOLD = 6;
 
@@ -559,6 +565,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * (Otherwise the table is resized if too many nodes in a bin.)
      * The value should be at least 4 * TREEIFY_THRESHOLD to avoid
      * conflicts between resizing and treeification thresholds.
+     * 联合TREEIFY_THRESHOLD控制是否树化，只有table长度达到64 且 某个桶位的长度达到8 才会真正的树化
      */
     static final int MIN_TREEIFY_CAPACITY = 64;
 
@@ -568,18 +575,21 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * serves as a lower bound to avoid resizers encountering
      * excessive memory contention.  The value should be at least
      * DEFAULT_CAPACITY.
+     * 线程迁移数据最小步长，控制线程迁移任务的最小区间
      */
     private static final int MIN_TRANSFER_STRIDE = 16;
 
     /**
      * The number of bits used for generation stamp in sizeCtl.
      * Must be at least 6 for 32bit arrays.
+     * 扩容时生成的一个标识戳
      */
     private static int RESIZE_STAMP_BITS = 16;
 
     /**
      * The maximum number of threads that can help resize.
      * Must fit in 32 - RESIZE_STAMP_BITS bits.
+     * 65535 表示并发扩容的最多线程数
      */
     private static final int MAX_RESIZERS = (1 << (32 - RESIZE_STAMP_BITS)) - 1;
 
@@ -591,12 +601,17 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
     /*
      * Encodings for Node hash fields. See above for explanation.
      */
+    //node的节点的hash 为-1 时：表示当前节点是FWD节点MOVED
     static final int MOVED     = -1; // hash for forwarding nodes
+    //node的节点的hash 为-2 时：表示当前节点已经树化，且当前节点是treeBean对象，treeBean对象代理操作红黑树
     static final int TREEBIN   = -2; // hash for roots of trees
     static final int RESERVED  = -3; // hash for transient reservations
+    //0x7fffffff =》 0111 1111 1111 1111 1111 1111 1111 1111 将一个负数通过位与运算得到正数
     static final int HASH_BITS = 0x7fffffff; // usable bits of normal node hash
 
-    /** Number of CPUS, to place bounds on some sizings */
+    /** Number of CPUS, to place bounds on some sizings
+     * 当前系统的cpu数量
+     * */
     static final int NCPU = Runtime.getRuntime().availableProcessors();
 
     /** For serialization compatibility. */
@@ -769,11 +784,13 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
     /**
      * The array of bins. Lazily initialized upon first insertion.
      * Size is always a power of two. Accessed directly by iterators.
+     * 散列表 长度一定是2的吃番薯
      */
     transient volatile Node<K,V>[] table;
 
     /**
      * The next table to use; non-null only while resizing.
+     * 扩容过程中，会将扩容中 新的table赋值给 nextTable 保持引用，扩容结束后 设置为null
      */
     private transient volatile Node<K,V>[] nextTable;
 
@@ -781,6 +798,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * Base counter value, used mainly when there is no contention,
      * but also as a fallback during table initialization
      * races. Updated via CAS.
+     * LongAdder 中的 baseCount 未发生竞争时 或 当前LongAdder 处于加锁状态 增量累积到baseCount
      */
     private transient volatile long baseCount;
 
@@ -791,21 +809,35 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * when table is null, holds the initial table size to use upon
      * creation, or 0 for default. After initialization, holds the
      * next element count value upon which to resize the table.
+     * sizeCtl表示
+     * 1.-1 表示table真正初始化（其他线程） 当前线程需要自旋等待
+     * 2. 表示table 真正库容， 高16位：扩容的标识戳， 低16位：1+nThread 当前参与并发扩容的线程数
+     *
+     * sizeCtl = 0 表示 创建tables时 使用的default_capacity 为大小
+     *
+     * sizeCtl > 0
+     * 1. 如果table未初始化，表示初始化大小
+     * 2. 如果table已经初始化，表示下次扩容时的触发条件（阈值）
      */
     private transient volatile int sizeCtl;
 
     /**
      * The next table index (plus one) to split while resizing.
+     * 扩容过程中，记录进度，所有线程都从transferIndex 中分配区间，去执行自己的扩容任务
      */
     private transient volatile int transferIndex;
 
     /**
      * Spinlock (locked via CAS) used when resizing and/or creating CounterCells.
+     * LongAdder 中的cellsBusy ，0表示无锁状态，1表示有锁状态
      */
     private transient volatile int cellsBusy;
 
     /**
      * Table of counter cells. When non-null, size is a power of 2.
+     * LongAdder 中的cells 当baseCount 发生竞争时，会创建cells数组，线程通过计算hash值
+     * 获取对应的的cell 将增量累加到指定的cell中
+     * 总数 = baseCount + cells的各数
      */
     private transient volatile CounterCell[] counterCells;
 
@@ -6276,11 +6308,17 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
 
     // Unsafe mechanics
     private static final sun.misc.Unsafe U;
+    /** 表示sizeCtl 在ConcurrentHashMap 内存中的偏移地址**/
     private static final long SIZECTL;
+    /** 表示transferIndex 在ConcurrentHashMap 内存中的偏移地址**/
     private static final long TRANSFERINDEX;
+    /** 表示baseCount 在ConcurrentHashMap 内存中的偏移地址**/
     private static final long BASECOUNT;
+    /** 表示cellsBusy 在ConcurrentHashMap 内存中的偏移地址**/
     private static final long CELLSBUSY;
+    /** 表示cellsVclue 在ConcurrentHashMap 内存中的偏移地址**/
     private static final long CELLVALUE;
+    /** 表示数组第一个元素的 在ConcurrentHashMap 内存中的偏移地址**/
     private static final long ABASE;
     private static final int ASHIFT;
 
@@ -6301,9 +6339,17 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                 (ck.getDeclaredField("value"));
             Class<?> ak = Node[].class;
             ABASE = U.arrayBaseOffset(ak);
+            //表示node[]数组单元 占用的空间大小
             int scale = U.arrayIndexScale(ak);
+            //判断scale 是否是2的次方数 （规范） 1 0000 & 0 1111 = 0 ：16&15=0
             if ((scale & (scale - 1)) != 0)
                 throw new Error("data type scale not a power of two");
+            //numberOfLeadingZeros返回当前数值 转化为2进制，从高位到低位开始统计，有多少个0连续在一块
+            // 8=> 1000  32-4 = 28
+            // 4=> 100  32-4 = 29
+            //ASHIFT= 31-29= 2
+            //ASHIFT 寻址算法使用， 已知第一个元素的偏移量 abase+5*scale 每个单元的大小就能获取到对应位置的偏移量
+            // 但乘法 计算复杂，转位运算 (1<<ASHIFT)   abase+(5<<ASHIFT)
             ASHIFT = 31 - Integer.numberOfLeadingZeros(scale);
         } catch (Exception e) {
             throw new Error(e);
