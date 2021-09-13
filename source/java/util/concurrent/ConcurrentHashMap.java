@@ -971,16 +971,31 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * @throws NullPointerException if the specified key is null
      */
     public V get(Object key) {
+        /**
+         * tab 引用map.table
+         * e 当前元素
+         * p 目标节点
+         * n table数组长度
+         * eh 当前元素hash
+         * ek 当前元素key
+         */
         Node<K,V>[] tab; Node<K,V> e, p; int n, eh; K ek;
+
+        //扰动下hash 使hash的 高位也参与
         int h = spread(key.hashCode());
+
         if ((tab = table) != null && (n = tab.length) > 0 &&
             (e = tabAt(tab, (n - 1) & h)) != null) {
             if ((eh = e.hash) == h) {
                 if ((ek = e.key) == key || (ek != null && key.equals(ek)))
                     return e.val;
             }
+            // -1 说明是fwd table 正在扩容 且当前查询的这个桶位的数据已经被迁移了
+            // -2 TreeBin 节点，需要使用TreeBin 提供的find 方法查询
             else if (eh < 0)
                 return (p = e.find(h, key)) != null ? p.val : null;
+
+            // 链表情况 一个节点节点遍历比较
             while ((e = e.next) != null) {
                 if (e.hash == h &&
                     ((ek = e.key) == key || (ek != null && key.equals(ek))))
@@ -2241,24 +2256,35 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
 
         Node<K,V> find(int h, Object k) {
             // loop to avoid arbitrarily deep recursion on forwarding nodes
-            outer: for (Node<K,V>[] tab = nextTable;;) {
+            //tab 一定不为空
+            Node<K,V>[] tab = nextTable;
+            outer: for (;;) {
+                //n 表示为扩容而创建的  新表的长度
+                //e 表示在扩容而创新表使用 寻址算法 得到的  桶位头结点
                 Node<K,V> e; int n;
+
+                //k == null  tab == null (n = tab.length) == 0 永远不成立
+                //重新获取对应桶位的头结点 如果为Null 扩容前就为null 或者 扩容后被其他线程删除了
                 if (k == null || tab == null || (n = tab.length) == 0 ||
                     (e = tabAt(tab, (n - 1) & h)) == null)
                     return null;
+                //有可能是node treeBin fwd
                 for (;;) {
                     int eh; K ek;
                     if ((eh = e.hash) == h &&
                         ((ek = e.key) == k || (ek != null && k.equals(ek))))
                         return e;
+                    // treeBin 或者fwd类型
                     if (eh < 0) {
                         if (e instanceof ForwardingNode) {
                             tab = ((ForwardingNode<K,V>)e).nextTable;
                             continue outer;
-                        }
+                         }
+                        //调用treeBin find（）
                         else
                             return e.find(h, k);
                     }
+                    //没有命中说明是链表
                     if ((e = e.next) == null)
                         return null;
                 }
@@ -2429,9 +2455,19 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
 
         //table 已经初始化 并且当前节点 是fwd节点
         if (tab != null && (f instanceof ForwardingNode) &&
-                //新
+                //新节点的nextTab 不为Null恒成立 new的时候 就已经赋值了
             (nextTab = ((ForwardingNode<K,V>)f).nextTable) != null) {
+            //获取当前的长度的 扩容标识戳
             int rs = resizeStamp(tab.length);
+            //nextTab == nextTable
+            //      成立：扩容正在进行中
+            //      不成立 扩容完了设置为null或者再次扩容了
+            //(sc = sizeCtl) < 0
+            //      成立说明正在扩容
+            //      不成立说明已经扩容结束 扩容结束会把nextTable 设置给table
+            //(sc = sizeCtl) < 0
+            //      成立说明 扩容进行中
+            //      不成立说明 下次的阈值 当前扩容结束
             while (nextTab == nextTable && table == tab &&
                    (sc = sizeCtl) < 0) {
                 if ((sc >>> RESIZE_STAMP_SHIFT) != rs || sc == rs + 1 ||
@@ -2442,6 +2478,8 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     break;
                 }
             }
+
+            //返回扩容好的新表
             return nextTab;
         }
         return table;
@@ -2533,17 +2571,30 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
         //i 表示分配给当前线程任务执行到的桶位
         //bound 表示分配给当前任务的下界限制
         int i = 0, bound = 0;
-        //自旋
+
+
         for (;;) {
             Node<K,V> f; int fh;
+            /**
+             * 1、给当前线程分配任务区间
+             * 2、维护当前线程任务进度（i表示当前处理的桶位）
+             * 3、维护map对象全局范围内的进度
+             */
             while (advance) {
+                // 分配任务区间的临时变量 nextIndex： 任务区间最上面的下标 nextBound：最下面的下标
                 int nextIndex, nextBound;
+
+                //--i >= bound（i一定再bound上或等于） 表示 当前线程的任务还未完成 --i是处理下一个桶位
+                // 不成立的情况 有 未分配或者 已经完成
                 if (--i >= bound || finishing)
                     advance = false;
+
+                //任务区间小于=0 表示无任务区间分配了
                 else if ((nextIndex = transferIndex) <= 0) {
                     i = -1;
                     advance = false;
                 }
+                //分配任务 如果任务区间为修改，分配任务 ，stride：步长
                 else if (U.compareAndSwapInt
                          (this, TRANSFERINDEX, nextIndex,
                           nextBound = (nextIndex > stride ?
@@ -2553,6 +2604,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     advance = false;
                 }
             }
+            //任务区间  分配完了 i在上面会赋值-1
             if (i < 0 || i >= n || i + n >= nextn) {
                 int sc;
                 if (finishing) {
@@ -2561,7 +2613,9 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     sizeCtl = (n << 1) - (n >>> 1);
                     return;
                 }
+                //cas 修改 sizeCtl的低16位，线程数减一
                 if (U.compareAndSwapInt(this, SIZECTL, sc = sizeCtl, sc - 1)) {
+                    //判断是否 是最后一个推出任务的线程，不是的话直接退出，是的话需要收拾残局
                     if ((sc - 2) != resizeStamp(n) << RESIZE_STAMP_SHIFT)
                         return;
                     finishing = advance = true;
@@ -2575,10 +2629,13 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
             else {
                 synchronized (f) {
                     if (tabAt(tab, i) == f) {
+                        //ln 低位链 hn高位链
                         Node<K,V> ln, hn;
+                        //头结点的hash大于0
                         if (fh >= 0) {
                             int runBit = fh & n;
                             Node<K,V> lastRun = f;
+                            //lastRun 后面的节点都是高位链或者低位链 就不用创建节点
                             for (Node<K,V> p = f.next; p != null; p = p.next) {
                                 int b = p.hash & n;
                                 if (b != runBit) {
@@ -2594,6 +2651,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                 hn = lastRun;
                                 ln = null;
                             }
+                            //把lastRun前面的节点都放到对应的链中
                             for (Node<K,V> p = f; p != lastRun; p = p.next) {
                                 int ph = p.hash; K pk = p.key; V pv = p.val;
                                 if ((ph & n) == 0)
@@ -2601,6 +2659,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                 else
                                     hn = new Node<K,V>(ph, pk, pv, hn);
                             }
+                            //设置低位链 和高位链 并把当前节点设置为fwd节点，标识已经迁移完
                             setTabAt(nextTab, i, ln);
                             setTabAt(nextTab, i + n, hn);
                             setTabAt(tab, i, fwd);
@@ -2615,7 +2674,10 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                 int h = e.hash;
                                 TreeNode<K,V> p = new TreeNode<K,V>
                                     (h, e.key, e.val, null, null);
+                                //红黑树先把新结点放在最后 然后再树化
+                                //低位链
                                 if ((h & n) == 0) {
+                                    //不存在头结点
                                     if ((p.prev = loTail) == null)
                                         lo = p;
                                     else
@@ -2623,6 +2685,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                     loTail = p;
                                     ++lc;
                                 }
+                                //高位链
                                 else {
                                     if ((p.prev = hiTail) == null)
                                         hi = p;
@@ -2632,8 +2695,10 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                     ++hc;
                                 }
                             }
+                            //如果低位链的节点数 未达到 树化的阈值 则变回链表，如果高位节点长度为0 则直接使用原来的树
                             ln = (lc <= UNTREEIFY_THRESHOLD) ? untreeify(lo) :
                                 (hc != 0) ? new TreeBin<K,V>(lo) : t;
+                            //如果高位链的节点数 未达到 树化的阈值 则变回链表，如果低位节点长度为0 则直接使用原来的树
                             hn = (hc <= UNTREEIFY_THRESHOLD) ? untreeify(hi) :
                                 (lc != 0) ? new TreeBin<K,V>(hi) : t;
                             setTabAt(nextTab, i, ln);
@@ -2866,9 +2931,17 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
      * not) to complete before tree restructuring operations.
      */
     static final class TreeBin<K,V> extends Node<K,V> {
+        //红黑树的根节点
         TreeNode<K,V> root;
+        //链表的头结点
         volatile TreeNode<K,V> first;
+        //等待者线程（当前lockState 是读锁状态）
         volatile Thread waiter;
+        /**
+         * 1.写线程 写是独占状态，以散列表来看，真正进入到TreeBin中的写线程 同一时刻只有一个线程  lockState：1
+         * 2.读锁状态 读锁是共享，同一时刻可以有多个线程，同时进入到 TreeBin对象获取数据 每一个线程都会 个给lockState+4
+         * 3.等待者状态 有线程在读，写线程等待，将lockState 的最低两位 设置为 10
+         */
         volatile int lockState;
         // values for lockState
         static final int WRITER = 1; // set while holding write lock
@@ -2902,6 +2975,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
             for (TreeNode<K,V> x = b, next; x != null; x = next) {
                 next = (TreeNode<K,V>)x.next;
                 x.left = x.right = null;
+                //头结点是null
                 if (r == null) {
                     x.parent = null;
                     x.red = false;
@@ -2912,6 +2986,8 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                     int h = x.hash;
                     Class<?> kc = null;
                     for (TreeNode<K,V> p = r;;) {
+                        //dir：hash小于当前循环结点的hash -1 大于 1
+                        //
                         int dir, ph;
                         K pk = p.key;
                         if ((ph = p.hash) > h)
@@ -2929,6 +3005,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
                                 xp.left = x;
                             else
                                 xp.right = x;
+                            //平衡红黑树
                             r = balanceInsertion(r, x);
                             break;
                         }
@@ -2943,6 +3020,7 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
          * Acquires write lock for tree restructuring.
          */
         private final void lockRoot() {
+            //将锁改成写锁失败，说明有读线程，或写线程，需要挂起
             if (!U.compareAndSwapInt(this, LOCKSTATE, 0, WRITER))
                 contendedLock(); // offload to separate method
         }
@@ -2959,20 +3037,26 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
          */
         private final void contendedLock() {
             boolean waiting = false;
+            //s 自旋值
             for (int s;;) {
+                //~WAITER 反码 11111.。。。01
+                //条件说明没有线程在访问
                 if (((s = lockState) & ~WAITER) == 0) {
+                    //说明写线程抢占 锁成功
                     if (U.compareAndSwapInt(this, LOCKSTATE, s, WRITER)) {
                         if (waiting)
                             waiter = null;
                         return;
                     }
                 }
+                //说明等待者表示为 为 0 ，这时可以 设置为1 将当前线程挂起
                 else if ((s & WAITER) == 0) {
                     if (U.compareAndSwapInt(this, LOCKSTATE, s, s | WAITER)) {
                         waiting = true;
                         waiter = Thread.currentThread();
                     }
                 }
+                //将等待者线程挂起等待
                 else if (waiting)
                     LockSupport.park(this);
             }
@@ -2985,24 +3069,36 @@ public class ConcurrentHashMap<K,V> extends AbstractMap<K,V>
          */
         final Node<K,V> find(int h, Object k) {
             if (k != null) {
+                //e 循环迭代的当前节点 跌宕的是first引用的链表
                 for (Node<K,V> e = first; e != null; ) {
+                    //s  保存的是lock 临时状态
+                    //ek 链表当前节点的key
                     int s; K ek;
+                    // (WAITER|WRITER) => 0010|0001=>0011
+                    // (s = lockState)只有lockState 后两位都不是0 才成立，则有的等待者线程 或者有写操作线程正在加锁
                     if (((s = lockState) & (WAITER|WRITER)) != 0) {
                         if (e.hash == h &&
                             ((ek = e.key) == k || (ek != null && k.equals(ek))))
                             return e;
                         e = e.next;
                     }
+                    //前置条件：当前没有读线程 和写线程
                     else if (U.compareAndSwapInt(this, LOCKSTATE, s,
                                                  s + READER)) {
                         TreeNode<K,V> r, p;
                         try {
+                            //查询操作
                             p = ((r = root) == null ? null :
                                  r.findTreeNode(h, k, null));
                         } finally {
+                            //等待者线程
                             Thread w;
+                            //释放当前读锁
+                            //(READER|WAITER) = 1010 => 表示只有一个线程在读 且只有一个线程在等待
+                            //2.(w = waiter) != null 说明有写线程等待
                             if (U.getAndAddInt(this, LOCKSTATE, -READER) ==
                                 (READER|WAITER) && (w = waiter) != null)
+                                //恢复写线程
                                 LockSupport.unpark(w);
                         }
                         return p;
