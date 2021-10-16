@@ -217,6 +217,7 @@ public class Semaphore implements java.io.Serializable {
 
     /**
      * NonFair version
+     * 非公平信号
      */
     static final class NonfairSync extends Sync {
         private static final long serialVersionUID = -2694183684443567898L;
@@ -232,6 +233,7 @@ public class Semaphore implements java.io.Serializable {
 
     /**
      * Fair version
+     * 公平信号
      */
     static final class FairSync extends Sync {
         private static final long serialVersionUID = 2014338818796000944L;
@@ -240,12 +242,22 @@ public class Semaphore implements java.io.Serializable {
             super(permits);
         }
 
+        /**
+         * 尝试获取通行证 获取成功 返回剩余通行证 >=0的值 获取失败返回 <0的值
+         * @param acquires
+         * @return
+         */
         protected int tryAcquireShared(int acquires) {
             for (;;) {
+                //判断在本线程之前AQS 是否有等待者线程在阻塞队列，有返回-1 需要进行等待
                 if (hasQueuedPredecessors())
                     return -1;
+                //走到这 没有等待者 线程 可以直接获取通行证 或者是headNext节点
                 int available = getState();
+                //剩余的通行证
                 int remaining = available - acquires;
+                //remaining < 0 获取通行证失败 越界了
+                //前置条件 remaining>0 cas更新剩余通行证 成功 返回，失败自旋
                 if (remaining < 0 ||
                     compareAndSetState(available, remaining))
                     return remaining;

@@ -173,14 +173,22 @@ public class CountDownLatch {
             return (getState() == 0) ? 1 : -1;
         }
 
+        /**
+         * 更新AQS state值 每调用一次 -1 正好为0 时返回true
+         * @param releases
+         * @return
+         */
         protected boolean tryReleaseShared(int releases) {
             // Decrement count; signal when transition to zero
             for (;;) {
                 int c = getState();
+                //还没减 已经是0 了 说明前面线程已经触发了唤醒操作 就返回false
                 if (c == 0)
                     return false;
                 int nextc = c-1;
+                //cas 成功 说明-1 成功 并且没有被其他线程修改state
                 if (compareAndSetState(c, nextc))
+                    //next==0 true 说明当前调用countDown 方法的线程真是需要触发唤醒的线程
                     return nextc == 0;
             }
         }
