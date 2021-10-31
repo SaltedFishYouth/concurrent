@@ -1,4 +1,4 @@
-package cn.lsx.concurrent.proxy;
+package cn.lsx.concurrent.proxy.demo03;
 
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.Method;
@@ -8,14 +8,20 @@ import java.lang.reflect.Proxy;
  * @author lsx
  * @date 2021/10/31 16:48
  **/
-public class JdkDynamicProxy implements InvocationHandler {
+public class JdkDynamicProxy03 implements InvocationHandler {
 	/**
 	 * 被代理对象
 	 */
 	private Object target;
 
-	public JdkDynamicProxy(Object target) {
+	/**
+	 * 责任链 头结点
+	 */
+	private AbstractHandler headHandler;
+
+	public JdkDynamicProxy03(Object target, AbstractHandler headHandler) {
 		this.target = target;
+		this.headHandler = headHandler;
 	}
 
 	/**
@@ -27,13 +33,11 @@ public class JdkDynamicProxy implements InvocationHandler {
 	 */
 	@Override
 	public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
-		System.out.println("好饿！");
-
-		Object ret = method.invoke(target, args);
-
-		System.out.println("吃饱了！");
-
-		return ret;
+		TargetMethod targetMethod = new TargetMethod();
+		targetMethod.setTarget(target);
+		targetMethod.setMethod(method);
+		targetMethod.setArgs(args);
+		return headHandler.proceed(targetMethod);
 	}
 
 	/**

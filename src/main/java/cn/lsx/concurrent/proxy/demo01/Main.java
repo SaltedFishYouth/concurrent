@@ -1,4 +1,4 @@
-package cn.lsx.concurrent.proxy;
+package cn.lsx.concurrent.proxy.demo01;
 
 import sun.misc.ProxyGenerator;
 
@@ -14,7 +14,7 @@ import java.io.IOException;
 public class Main {
     public static void main(String[] args) {
         //1、创建被代理目标
-        Cat cat = new Cat();
+        Dog cat = new Dog();
         cat.eat();
         System.out.println("--------------------------------");
         //2、创建JdkDynamicProxy
@@ -37,7 +37,7 @@ public class Main {
         byte[] bytes = ProxyGenerator.generateProxyClass(proxyName, clazz.getInterfaces());
         FileOutputStream out = null;
         try {
-            out = new FileOutputStream("E:\\workspace\\concurrent\\src\\main\\java\\cn\\lsx\\concurrent\\proxy\\" + proxyName + ".class");
+            out = new FileOutputStream("E:\\workspace\\concurrent\\src\\main\\java\\cn\\lsx\\concurrent\\proxy\\demo01\\" + proxyName + ".class");
             out.write(bytes);
             out.flush();
         } catch (IOException e) {
