@@ -14,13 +14,13 @@ import cn.lsx.concurrent.proxy.demo03.TargetMethod;
 public class Main {
     public static void main(String[] args) {
         //1、创建被代理对象
-        Dog cat = new Dog();
+        Dog dog = new Dog();
 
         System.out.println("-----------------没代理---------------------");
-        cat.eat();
+        dog.eat();
 
         //2、先创建 jdkDynamicproxy 对象
-        JdkDynamicProxy04 dynamicProxy = new JdkDynamicProxy04(cat);
+        JdkDynamicProxy04 dynamicProxy = new JdkDynamicProxy04(dog);
 
         //3、添加拦截器增强
         dynamicProxy.addInterceptor(new OneMethodInterceptor());

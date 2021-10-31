@@ -14,11 +14,11 @@ import java.io.IOException;
 public class Main {
     public static void main(String[] args) {
         //1、创建被代理目标
-        Dog cat = new Dog();
-        cat.eat();
+        Dog dog = new Dog();
+        dog.eat();
         System.out.println("--------------------------------");
         //2、创建JdkDynamicProxy
-        JdkDynamicProxy dynamicProxy = new JdkDynamicProxy(cat);
+        JdkDynamicProxy dynamicProxy = new JdkDynamicProxy(dog);
 
         //3、获取代理之后的对象
         Animal proxy = (Animal) dynamicProxy.getProxy();

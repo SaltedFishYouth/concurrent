@@ -11,10 +11,10 @@ import cn.lsx.concurrent.proxy.demo01.Dog;
 public class Main {
     public static void main(String[] args) {
         //1、创建被代理对象
-        Dog cat = new Dog();
+        Dog dog = new Dog();
 
         System.out.println("-----------------没代理---------------------");
-        cat.eat();
+        dog.eat();
 
         //2、创建责任链
         AbstractHandler headHandler = new AbstractHandler.HeadHandler();
@@ -23,7 +23,7 @@ public class Main {
         headHandler.setNextHandler(oneHandler);
 
         //3、先创建 jdkDynamicproxy 对象
-        JdkDynamicProxy03 dynamicProxy = new JdkDynamicProxy03(cat,headHandler);
+        JdkDynamicProxy03 dynamicProxy = new JdkDynamicProxy03(dog,headHandler);
 
         //4、获取代理对象
         Animal proxy = (Animal)dynamicProxy.getProxy();
